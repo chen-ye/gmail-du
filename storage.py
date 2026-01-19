@@ -1,14 +1,17 @@
 
+import sqlite3
+from typing import Any, Dict, List, Optional, Tuple
+
 import aiosqlite
 
 DB_NAME = "gmail_du.db"
 
 
 class Storage:
-    def __init__(self, db_path=DB_NAME):
+    def __init__(self, db_path: str = DB_NAME) -> None:
         self.db_path = db_path
 
-    async def init_db(self):
+    async def init_db(self) -> None:
         async with aiosqlite.connect(self.db_path) as db:
             await db.execute("""
                 CREATE TABLE IF NOT EXISTS messages (
@@ -29,22 +32,22 @@ class Storage:
             """)
             await db.commit()
 
-    async def get_state(self, key):
+    async def get_state(self, key: str) -> Optional[str]:
         async with aiosqlite.connect(self.db_path) as db:
             async with db.execute(
                 "SELECT value FROM state WHERE key = ?", (key,)
             ) as cursor:
                 row = await cursor.fetchone()
-                return row[0] if row else None
+                return str(row[0]) if row else None
 
-    async def save_state(self, key, value):
+    async def save_state(self, key: str, value: str) -> None:
         async with aiosqlite.connect(self.db_path) as db:
             await db.execute(
                 "INSERT OR REPLACE INTO state (key, value) VALUES (?, ?)", (key, value)
             )
             await db.commit()
 
-    async def save_messages_batch(self, messages):
+    async def save_messages_batch(self, messages: List[Dict[str, Any]]) -> None:
         """
         Save a batch of message IDs.
         messages: list of dicts with 'id' and 'threadId'.
@@ -57,7 +60,7 @@ class Storage:
             )
             await db.commit()
 
-    async def update_message_details(self, details_list):
+    async def update_message_details(self, details_list: List[Dict[str, Any]]) -> None:
         """
         Update message details after fetching.
         details_list: list of tuples/dicts matching the schema
@@ -65,7 +68,7 @@ class Storage:
         async with aiosqlite.connect(self.db_path) as db:
             await db.executemany(
                 """
-                UPDATE messages 
+                UPDATE messages
                 SET size = ?, internal_date = ?, sender = ?, subject = ?, status = 'complete'
                 WHERE id = ?
                 """,
@@ -76,15 +79,15 @@ class Storage:
             )
             await db.commit()
 
-    async def get_pending_messages(self, limit=1000):
+    async def get_pending_messages(self, limit: int = 1000) -> List[str]:
         async with aiosqlite.connect(self.db_path) as db:
             db.row_factory = aiosqlite.Row
             async with db.execute(
                 "SELECT id FROM messages WHERE status = 'pending' LIMIT ?", (limit,)
             ) as cursor:
-                return [row["id"] for row in await cursor.fetchall()]
+                return [str(row["id"]) for row in await cursor.fetchall()]
 
-    async def get_all_completed_messages(self):
+    async def get_all_completed_messages(self) -> List[Any]:
         async with aiosqlite.connect(self.db_path) as db:
             db.row_factory = aiosqlite.Row
             async with db.execute(
@@ -92,9 +95,15 @@ class Storage:
             ) as cursor:
                 return await cursor.fetchall()
 
-    async def get_total_counts(self):
+
+    async def get_total_counts(self) -> Tuple[int, int]:
         async with aiosqlite.connect(self.db_path) as db:
             async with db.execute(
-                "SELECT COUNT(*), COUNT(CASE WHEN status='complete' THEN 1 END) FROM messages"
+                "SELECT COUNT(*), COUNT(CASE WHEN status='complete' THEN 1 END) "
+                "FROM messages"
             ) as cursor:
-                return await cursor.fetchone()
+                row = await cursor.fetchone()
+                if row:
+                    return int(row[0]), int(row[1])
+                return 0, 0
+

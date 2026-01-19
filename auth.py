@@ -1,5 +1,7 @@
 import os.path
 
+from typing import Optional
+
 from google.auth.transport.requests import Request
 from google.oauth2.credentials import Credentials
 from google_auth_oauthlib.flow import InstalledAppFlow
@@ -11,8 +13,8 @@ SCOPES = [
 ]
 
 
-def authenticate():
-    creds = None
+def authenticate() -> Credentials:
+    creds: Optional[Credentials] = None
     # The file token.json stores the user's access and refresh tokens, and is
     # created automatically when the authorization flow completes for the first
     # time.
@@ -25,7 +27,7 @@ def authenticate():
         else:
             if not os.path.exists("credentials.json"):
                 raise FileNotFoundError(
-                    "credentials.json not found. Please download it from Google Cloud Console."
+                    "credentials.json not found. Please download from Cloud Console."
                 )
 
             flow = InstalledAppFlow.from_client_secrets_file("credentials.json", SCOPES)
@@ -35,3 +37,4 @@ def authenticate():
             token.write(creds.to_json())
 
     return creds
+
