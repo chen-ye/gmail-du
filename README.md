@@ -5,6 +5,7 @@ A Python CLI tool to visualize Gmail storage usage, grouped by various factors l
 ## Features
 
 *   **Interactive TUI**: A terminal user interface (`--tui`) akin to `ncdu` for browsing storage usage.
+*   **Mark Messages**: Interactively mark messages or groups of messages in the TUI (Key: `m`). Marked messages get the label `gmail-du-marked` in Gmail, making them easy to find and delete.
 *   **Asynchronous Scanning**: Uses `aiohttp` for high-performance concurrent fetching.
 *   **Resumable**: Stores progress in a local SQLite database (`gmail_du.db`).
 *   **Analysis**: Aggregates stats by Sender and Month.
@@ -38,6 +39,7 @@ uv run main.py --tui
 *   **Scan**: Enter a query (e.g. `larger:1M`) and click Scan.
 *   **Navigate**: Use arrow keys to select a Sender or Month.
 *   **Drill Down**: Press **Enter** on a Sender to see their specific messages.
+*   **Mark Messages**: Press **m** to apply the label `gmail-du-marked` to the selected message or group (e.g., all emails from that sender).
 *   **Back**: Press **Escape** to go back to the main view.
 
 ### CLI Mode

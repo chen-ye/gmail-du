@@ -64,6 +64,7 @@ class GmailDUApp(App):
         Binding("q", "quit", "Quit"),
         Binding("r", "refresh_data", "Refresh"),
         Binding("escape", "go_back", "Back"),
+        Binding("m", "mark_selected", "Mark Selection in Gmail"),
     ]
 
     def __init__(self, storage, creds):
@@ -74,6 +75,8 @@ class GmailDUApp(App):
         self.worker = None
         self.current_view = "Top Senders"
         self.drill_filter = None # tuple (type, value) e.g. ('sender', 'foo@bar.com')
+        # Cache current dataframe for lookups
+        self.current_df = pd.DataFrame()
 
     def compose(self) -> ComposeResult:
         yield Header()
@@ -113,9 +116,6 @@ class GmailDUApp(App):
             bar.progress = completed
         
         # Only calc stats occasionally or if changed? 
-        # For now, lightweight enough to do check
-        # But analyzer needs to load all rows... heavy.
-        # Let's only update the stats text if we are scanning
         if self.query_one("#scan_btn").disabled:
             self.query_one("#stats_display").update(f"Scanning: {completed}/{total}")
 
@@ -156,7 +156,6 @@ class GmailDUApp(App):
                 if self.worker.is_cancelled: break
                 processed = await self.scanner.fetch_details()
                 if processed == 0: break
-                # allow UI updates
                 await asyncio.sleep(0.01)
         except asyncio.CancelledError:
             pass
@@ -175,16 +174,97 @@ class GmailDUApp(App):
     async def action_go_back(self):
         if self.drill_filter:
             self.drill_filter = None
-            # Reset select to what it was? 
-            # If we were in "Top Senders" and drilled down, we want to go back to "Top Senders"
-            # The view_select likely didn't change, just the table content.
             await self.refresh_data()
+
+    async def action_mark_selected(self):
+        """Mark selected messages with a label."""
+        table = self.query_one(DataTable)
+        try:
+            row_key = table.coordinate_to_cell_key(table.cursor_coordinate).row_key
+            row_data = table.get_row(row_key)
+        except Exception:
+            self.notify("No row selected.", severity="warning")
+            return
+
+        ids_to_mark = []
+        label_desc = ""
+
+        # Determine what to mark based on view
+        if self.drill_filter:
+            # We are viewing specific messages. 
+            # In drill-down view, we need to know the ID.
+            # Currently drill-down columns: Date, Subject, Size. ID is not shown but we can stash it?
+            # Or we can look it up in self.current_df.
+            # But the table row doesn't have the ID.
+            # Let's fix refresh_data to store IDs in row keys or be able to look them up.
+            
+            # Since we didn't use row keys explicitly, Textual generated them.
+            # We need to rebuild the table with explicit keys equal to message ID for messages
+            pass 
+        
+        # We need a robust way to get IDs. 
+        # Strategy: Run a query on self.current_df based on the selection.
+        
+        df = self.current_df
+        if df.empty:
+            self.notify("No data available.", severity="error")
+            return
+
+        if self.drill_filter:
+             # Drill down view: Individual messages
+             # Problem: We need to know which message this row corresponds to.
+             # We can use the row index if we sorted the DF exactly the same way.
+             # Better: Update refresh_data to use Message ID as row key for message lists.
+             
+             # If we are in drill-down, the row key SHOULD be the message ID (see refresh_data update below)
+             # Wait, refresh_data below doesn't set row key yet. I will update it.
+             
+             mid = row_key.value # If we set key=mid
+             ids_to_mark = [mid]
+             label_desc = "1 message"
+
+        elif self.current_view == "Top Senders":
+            sender = row_data[0] # Sender email
+            ids_to_mark = df[df['sender'] == sender]['id'].tolist()
+            label_desc = f"all messages from {sender}"
+            
+        elif self.current_view == "Usage by Month":
+            month = row_data[0] # YYYY-MM
+            ids_to_mark = df[df['year_month'] == month]['id'].tolist()
+            label_desc = f"all messages in {month}"
+
+        elif self.current_view == "All Messages":
+             # We need ID as key here too
+             mid = row_key.value
+             ids_to_mark = [mid]
+             label_desc = "1 message"
+
+        if not ids_to_mark:
+            self.notify("No messages found to mark.", severity="warning")
+            return
+
+        self.notify(f"Marking {len(ids_to_mark)} messages... ({label_desc})")
+        
+        # Run in worker
+        self.run_worker(
+            self.mark_task(ids_to_mark),
+            exclusive=False,
+            thread=False
+        )
+
+    async def mark_task(self, ids):
+        scanner = AsyncGmailScanner(self.creds, self.storage)
+        try:
+            count = await scanner.add_labels(ids)
+            self.notify(f"Successfully marked {count} messages.", severity="information")
+        except Exception as e:
+            self.notify(f"Error marking messages: {e}", severity="error")
+        finally:
+            await scanner.close()
 
     def on_data_table_row_selected(self, event: DataTable.RowSelected):
         # Handle drill down
         if self.current_view == "Top Senders" and not self.drill_filter:
-            # Row key or cell? 
-            # We put sender email in the first column.
             row = self.query_one(DataTable).get_row(event.row_key)
             sender = row[0]
             self.drill_filter = ('sender', sender)
@@ -198,15 +278,15 @@ class GmailDUApp(App):
 
     async def refresh_data(self):
         """Reload data from DB and update table."""
-        # This is heavy for large DBs. Ideally we cache the DF.
         rows = await self.storage.get_all_completed_messages()
         analyzer = GmailAnalyzer(rows)
+        self.current_df = analyzer.df
+        df = self.current_df
         
         table = self.query_one(DataTable)
         table.clear(columns=True)
         
         # Apply Drill Filter
-        df = analyzer.df
         display_df = df
         
         if self.drill_filter:
@@ -218,16 +298,17 @@ class GmailDUApp(App):
                 display_df = df[df['year_month'] == fval]
                 title = f"Messages in {fval}"
             
-            # Show file list mode
             self.query_one("#stats_display").update(f"{title} ({len(display_df)} msgs)")
             table.add_columns("Date", "Subject", "Size (MB)")
             
             sorted_df = display_df.sort_values('size', ascending=False).head(500)
             for _, row in sorted_df.iterrows():
+                # Use Message ID as Row Key for easy retrieval
                 table.add_row(
                     str(row['date']),
                     str(row['subject'])[:50], 
-                    f"{row['size'] / (1024*1024):.2f}"
+                    f"{row['size'] / (1024*1024):.2f}",
+                    key=str(row['id']) 
                 )
             return
 
@@ -240,7 +321,8 @@ class GmailDUApp(App):
                     table.add_row(
                         str(sender), 
                         f"{row['size'] / (1024*1024):.2f}",
-                        str(row['id'])
+                        str(row['id']),
+                        key=str(sender) # Use sender as key
                     )
         
         elif self.current_view == "Usage by Month":
@@ -251,7 +333,8 @@ class GmailDUApp(App):
                     table.add_row(
                         str(month),
                         f"{row['size'] / (1024*1024):.2f}",
-                        str(row['id'])
+                        str(row['id']),
+                        key=str(month) # Use month as key
                     )
 
         elif self.current_view == "All Messages":
@@ -263,7 +346,8 @@ class GmailDUApp(App):
                         str(row['date']),
                         str(row['sender']),
                         str(row['subject'])[:40],
-                        f"{row['size'] / (1024*1024):.2f}"
+                        f"{row['size'] / (1024*1024):.2f}",
+                        key=str(row['id']) # Use ID as key
                     )
         
         # Update Stats
