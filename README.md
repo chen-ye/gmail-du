@@ -2,6 +2,12 @@
 
 A Python CLI tool to visualize Gmail storage usage, grouped by various factors like sender and date.
 
+## Features
+
+*   **Asynchronous Scanning**: Uses `aiohttp` for high-performance concurrent fetching of message metadata.
+*   **Resumable**: Stores progress in a local SQLite database (`gmail_du.db`). You can stop and restart the scan at any time without losing progress.
+*   **Analysis**: aggregated stats by Sender and Month.
+
 ## Setup
 
 1.  **Install uv**:
@@ -34,23 +40,27 @@ uv run main.py [options]
 ### Options
 
 *   `-q, --query`: Gmail search query (e.g., `'larger:5M'`, `'category:promotions'`).
-*   `-l, --limit`: Limit the number of messages to scan (default: 100).
-*   `--by-sender`: specific flag to show usage grouped by sender.
-*   `--by-month`: specific flag to show usage grouped by month.
+*   `-l, --limit`: Limit the number of messages to scan.
+*   `--by-sender`: Show usage grouped by sender.
+*   `--by-month`: Show usage grouped by month.
+*   `--reset`: Clear the local database and cache before starting.
 
 ### Examples
 
-**Scan top 100 messages:**
+**Scan top 1000 messages:**
 ```bash
-uv run main.py
+uv run main.py -l 1000
 ```
 
-**Scan messages larger than 1MB and group by sender:**
+**Resume a previous scan:**
+Just run the command again. It will automatically pick up where it left off.
+
+**Analyze usage by sender:**
 ```bash
-uv run main.py -q "larger:1M" -l 500 --by-sender
+uv run main.py --by-sender
 ```
 
-**Analyze usage over time:**
+**Force a fresh start:**
 ```bash
-uv run main.py -l 1000 --by-month
+uv run main.py --reset
 ```

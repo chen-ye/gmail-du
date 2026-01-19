@@ -1,74 +1,164 @@
-from googleapiclient.discovery import build
-from googleapiclient.http import BatchHttpRequest
-from rich.progress import Progress
-import math
+import aiohttp
+import asyncio
+from rich.progress import Progress, BarColumn, TextColumn, TimeRemainingColumn
+from google.auth.transport.requests import Request
+import logging
 
-class GmailScanner:
-    def __init__(self, service):
-        self.service = service
+# Limit concurrency to avoid hitting rate limits too hard
+# Gmail API User Rate Limit: 250 quota units / user / second
+# messages.get = 5 units. 
+# 250 / 5 = 50 requests per second max.
+MAX_CONCURRENT_REQUESTS = 30
 
-    def list_messages(self, query='', limit=None):
-        """List messages matching query, up to limit."""
-        messages = []
-        request = self.service.users().messages().list(userId='me', q=query, includeSpamTrash=False)
+class AsyncGmailScanner:
+    def __init__(self, credentials, storage):
+        self.creds = credentials
+        self.storage = storage
+        self.base_url = "https://gmail.googleapis.com/gmail/v1/users/me"
+        self.session = None
+
+    async def _get_session(self):
+        if self.session is None or self.session.closed:
+            self.session = aiohttp.ClientSession(headers={
+                "Authorization": f"Bearer {self.creds.token}",
+                "Accept": "application/json"
+            })
         
-        while request is not None:
-            response = request.execute()
-            batch = response.get('messages', [])
-            messages.extend(batch)
+        # Check token expiry and refresh if needed
+        if self.creds.expired:
+            self.creds.refresh(Request())
+            self.session.headers["Authorization"] = f"Bearer {self.creds.token}"
             
-            if limit and len(messages) >= limit:
-                return messages[:limit]
-                
-            request = self.service.users().messages().list_next(request, response)
-        
-        return messages
+        return self.session
 
-    def get_message_details(self, message_ids, batch_size=50):
+    async def close(self):
+        if self.session:
+            await self.session.close()
+
+    async def fetch_list(self, query='', limit=None):
         """
-        Fetch details using batch requests.
+        Fetch message list pages and save IDs to DB.
         """
+        session = await self._get_session()
+        
+        # Check if we have a saved page token for this query
+        # Note: Ideally we key state by query, but for MVP we use a global 'list_page_token'
+        # If the query changes, the user might want to clear DB or we need smart state management.
+        # For now, we'll assume one active query session.
+        next_page_token = await self.storage.get_state("next_page_token")
+        
+        params = {
+            "q": query,
+            "maxResults": "500", # Max allowed
+            "includeSpamTrash": "false"
+        }
+
+        total_fetched = 0
+        
+        # If we have a limit, check if we already have enough in DB? 
+        # For now, let's keep fetching until we hit limit or end.
+        
+        print("Scanning message list...")
+        while True:
+            if next_page_token:
+                params["pageToken"] = next_page_token
+            
+            async with session.get(f"{self.base_url}/messages", params=params) as resp:
+                if resp.status != 200:
+                    text = await resp.text()
+                    print(f"Error listing messages: {resp.status} - {text}")
+                    break
+                    
+                data = await resp.json()
+                messages = data.get("messages", [])
+                
+                if messages:
+                    await self.storage.save_messages_batch(messages)
+                    total_fetched += len(messages)
+                    print(f"Found {len(messages)} messages (Total: {total_fetched})...")
+                
+                next_page_token = data.get("nextPageToken")
+                await self.storage.save_state("next_page_token", next_page_token if next_page_token else "")
+                
+                if not next_page_token:
+                    break
+                
+                if limit and total_fetched >= limit:
+                    break
+
+    async def fetch_details(self):
+        """
+        Fetch details for pending messages.
+        """
+        session = await self._get_session()
+        semaphore = asyncio.Semaphore(MAX_CONCURRENT_REQUESTS)
+        
+        pending_ids = await self.storage.get_pending_messages(limit=5000) # Process in chunks
+        if not pending_ids:
+            return 0
+
+        async def get_msg(mid):
+            async with semaphore:
+                try:
+                    # format='metadata' is lighter, 'minimal' is lightest but has no headers
+                    url = f"{self.base_url}/messages/{mid}"
+                    params = {
+                        "format": "metadata",
+                        "metadataHeaders": ["From", "Date", "Subject"]
+                    }
+                    async with session.get(url, params=params) as resp:
+                        if resp.status == 200:
+                            return await resp.json()
+                        elif resp.status == 404:
+                            # Message deleted?
+                            return {"id": mid, "deleted": True}
+                        else:
+                            # Rate limit or other error
+                            return None
+                except Exception as e:
+                    return None
+
+        # Process
         results = []
-        
-        def callback(request_id, response, exception):
-            if exception:
-                # Handle specific errors if needed
-                print(f"Error fetching message {request_id}: {exception}")
-            else:
-                results.append(response)
-
-        # Split into chunks
-        total = len(message_ids)
-        chunks = [message_ids[i:i + batch_size] for i in range(0, total, batch_size)]
-        
-        with Progress() as progress:
-            task = progress.add_task("[green]Fetching details...", total=total)
+        with Progress(
+            TextColumn("[progress.description]{task.description}"),
+            BarColumn(),
+            TextColumn("[progress.percentage]{task.percentage:>3.0f}%"),
+            TimeRemainingColumn(),
+        ) as progress:
+            task = progress.add_task("[cyan]Fetching details...", total=len(pending_ids))
             
-            for chunk in chunks:
-                batch = self.service.new_batch_http_request(callback=callback)
-                for mid in chunk:
-                    # format='metadata' gives us headers (Sender, Subject, Date) and sizeEstimate
-                    # We need metadataHeaders to limit payload size if we only want specific headers
-                    batch.add(
-                        self.service.users().messages().get(
-                            userId='me', 
-                            id=mid, 
-                            format='metadata',
-                            metadataHeaders=['From', 'Date', 'Subject']
-                        ),
-                        request_id=mid
-                    )
-                batch.execute()
-                progress.update(task, advance=len(chunk))
+            # Create tasks
+            tasks = [get_msg(mid) for mid in pending_ids]
+            
+            # Run tasks
+            for coro in asyncio.as_completed(tasks):
+                res = await coro
+                progress.update(task, advance=1)
+                if res:
+                    if res.get("deleted"):
+                         # Mark deleted or remove? For now, we just don't add to update list
+                         # Maybe mark status='deleted' in DB
+                         pass
+                    else:
+                        payload = res.get("payload", {})
+                        headers = {h["name"]: h["value"] for h in payload.get("headers", [])}
+                        
+                        results.append({
+                            "id": res["id"],
+                            "size": int(res.get("sizeEstimate", 0)),
+                            "internalDate": int(res.get("internalDate", 0)),
+                            "sender": headers.get("From", "Unknown"),
+                            "subject": headers.get("Subject", "(No Subject)")
+                        })
+                        
+                # Batch save every 100 to avoid memory bloat
+                if len(results) >= 100:
+                    await self.storage.update_message_details(results)
+                    results = []
+
+            # Save remaining
+            if results:
+                await self.storage.update_message_details(results)
                 
-        return results
-
-    def get_labels(self):
-        """Fetch label ID to name mapping."""
-        try:
-            results = self.service.users().labels().list(userId='me').execute()
-            labels = results.get('labels', [])
-            return {l['id']: l['name'] for l in labels}
-        except Exception:
-            return {}
-
+        return len(pending_ids)
