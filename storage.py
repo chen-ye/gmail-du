@@ -1,8 +1,8 @@
+
 import aiosqlite
-import json
-from pathlib import Path
 
 DB_NAME = "gmail_du.db"
+
 
 class Storage:
     def __init__(self, db_path=DB_NAME):
@@ -31,25 +31,29 @@ class Storage:
 
     async def get_state(self, key):
         async with aiosqlite.connect(self.db_path) as db:
-            async with db.execute("SELECT value FROM state WHERE key = ?", (key,)) as cursor:
+            async with db.execute(
+                "SELECT value FROM state WHERE key = ?", (key,)
+            ) as cursor:
                 row = await cursor.fetchone()
                 return row[0] if row else None
 
     async def save_state(self, key, value):
         async with aiosqlite.connect(self.db_path) as db:
-            await db.execute("INSERT OR REPLACE INTO state (key, value) VALUES (?, ?)", (key, value))
+            await db.execute(
+                "INSERT OR REPLACE INTO state (key, value) VALUES (?, ?)", (key, value)
+            )
             await db.commit()
 
     async def save_messages_batch(self, messages):
         """
-        Save a batch of message IDs. 
+        Save a batch of message IDs.
         messages: list of dicts with 'id' and 'threadId'.
         """
         async with aiosqlite.connect(self.db_path) as db:
             # parsing 'pending' status is default
             await db.executemany(
                 "INSERT OR IGNORE INTO messages (id, thread_id) VALUES (?, ?)",
-                [(m['id'], m['threadId']) for m in messages]
+                [(m["id"], m["threadId"]) for m in messages],
             )
             await db.commit()
 
@@ -66,25 +70,31 @@ class Storage:
                 WHERE id = ?
                 """,
                 [
-                    (d['size'], d['internalDate'], d['sender'], d['subject'], d['id'])
+                    (d["size"], d["internalDate"], d["sender"], d["subject"], d["id"])
                     for d in details_list
-                ]
+                ],
             )
             await db.commit()
 
     async def get_pending_messages(self, limit=1000):
         async with aiosqlite.connect(self.db_path) as db:
             db.row_factory = aiosqlite.Row
-            async with db.execute("SELECT id FROM messages WHERE status = 'pending' LIMIT ?", (limit,)) as cursor:
-                return [row['id'] for row in await cursor.fetchall()]
+            async with db.execute(
+                "SELECT id FROM messages WHERE status = 'pending' LIMIT ?", (limit,)
+            ) as cursor:
+                return [row["id"] for row in await cursor.fetchall()]
 
     async def get_all_completed_messages(self):
         async with aiosqlite.connect(self.db_path) as db:
             db.row_factory = aiosqlite.Row
-            async with db.execute("SELECT * FROM messages WHERE status = 'complete'") as cursor:
+            async with db.execute(
+                "SELECT * FROM messages WHERE status = 'complete'"
+            ) as cursor:
                 return await cursor.fetchall()
-    
+
     async def get_total_counts(self):
         async with aiosqlite.connect(self.db_path) as db:
-             async with db.execute("SELECT COUNT(*), COUNT(CASE WHEN status='complete' THEN 1 END) FROM messages") as cursor:
-                 return await cursor.fetchone()
+            async with db.execute(
+                "SELECT COUNT(*), COUNT(CASE WHEN status='complete' THEN 1 END) FROM messages"
+            ) as cursor:
+                return await cursor.fetchone()

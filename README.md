@@ -26,6 +26,20 @@ A Python CLI tool to visualize Gmail storage usage, grouped by various factors l
     *   Create **OAuth 2.0 Client IDs** (Desktop App) in Google Cloud Console.
     *   Save as `credentials.json` in this directory.
 
+## Development
+
+This project uses `ruff` for linting and formatting.
+
+1.  **Run Linter**:
+    ```bash
+    uv run ruff check .
+    ```
+
+2.  **Format Code**:
+    ```bash
+    uv run ruff format .
+    ```
+
 ## Usage
 
 ### Interactive Mode (TUI)
@@ -39,7 +53,7 @@ uv run main.py --tui
 *   **Scan**: Enter a query (e.g. `larger:1M`) and click Scan.
 *   **Navigate**: Use arrow keys to select a Sender or Month.
 *   **Drill Down**: Press **Enter** on a Sender to see their specific messages.
-*   **Mark Messages**: Press **m** to apply the label `gmail-du-marked` to the selected message or group (e.g., all emails from that sender).
+*   **Mark Messages**: Press **m** to apply the label `gmail-du-marked` to the selected message or group.
 *   **Back**: Press **Escape** to go back to the main view.
 
 ### CLI Mode
