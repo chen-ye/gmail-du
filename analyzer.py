@@ -25,6 +25,7 @@ class GmailAnalyzer:
                 'id': row['id'],
                 'size': row['size'],
                 'sender': row['sender'],
+                'subject': row['subject'],
                 'date': dt,
                 'year_month': dt.strftime('%Y-%m') if dt else 'Unknown'
             })

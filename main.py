@@ -36,10 +36,9 @@ async def async_main():
     parser.add_argument('--by-sender', action='store_true', help="Group by sender")
     parser.add_argument('--by-month', action='store_true', help="Group by month")
     parser.add_argument('--reset', action='store_true', help="Clear local cache/db before starting")
+    parser.add_argument('--tui', action='store_true', help="Launch interactive TUI (Text User Interface)")
     
     args = parser.parse_args()
-
-    console.print("[bold blue]Gmail DU[/bold blue] (Async Mode)")
 
     # 1. Init DB
     storage = Storage()
@@ -53,31 +52,32 @@ async def async_main():
 
     # 2. Auth
     try:
-        # Note: auth.authenticate() is synchronous/interactive. 
-        # Ideally, we run this in executor if it blocks, but it's fine for startup.
         creds = authenticate()
     except Exception as e:
         console.print(f"[bold red]Authentication failed:[/bold red] {e}")
         return
 
-    # 3. Scan
+    # TUI Mode
+    if args.tui:
+        from tui import GmailDUApp
+        app = GmailDUApp(storage, creds)
+        await app.run_async()
+        return
+
+    # CLI Mode
+    console.print("[bold blue]Gmail DU[/bold blue] (CLI Mode)")
+
     scanner = AsyncGmailScanner(creds, storage)
     
     try:
-        # Check if we have existing messages
         total, completed = await storage.get_total_counts()
         console.print(f"Database status: {total} messages found, {completed} details fetched.")
-        
-        # Determine if we need to list more messages
-        # If user provides a query that differs from previous run, we might have an issue with mixed state
-        # For now, we just append.
         
         if args.limit and total >= args.limit:
             console.print("Limit reached in DB. Skipping list fetch.")
         else:
             await scanner.fetch_list(query=args.query, limit=args.limit)
 
-        # Loop to fetch details until all done
         while True:
             processed = await scanner.fetch_details()
             if processed == 0:
@@ -87,7 +87,6 @@ async def async_main():
     finally:
         await scanner.close()
 
-    # 4. Analyze
     console.print("Loading data for analysis...")
     rows = await storage.get_all_completed_messages()
     analyzer = GmailAnalyzer(rows)
