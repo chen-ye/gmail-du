@@ -4,9 +4,18 @@ A Python CLI tool to visualize Gmail storage usage, grouped by various factors l
 
 ## Features
 
-*   **Asynchronous Scanning**: Uses `aiohttp` for high-performance concurrent fetching of message metadata.
-*   **Resumable**: Stores progress in a local SQLite database (`gmail_du.db`). You can stop and restart the scan at any time without losing progress.
-*   **Analysis**: aggregated stats by Sender and Month.
+*   **Asynchronous Scanning**: Uses `aiohttp` for high-performance concurrent fetching of message metadata, capable of processing thousands of messages quickly.
+*   **Resumable**: Stores progress in a local SQLite database (`gmail_du.db`). You can stop (Ctrl+C) and restart the scan at any time without losing progress.
+*   **Smart Analysis**: Aggregates storage usage stats by **Sender** and **Month**.
+*   **OAuth2 Secure**: Runs locally on your machine using standard Google OAuth2 authentication.
+
+## Architecture
+
+*   **Scanner**: Fetches message lists and details using the Gmail API. It separates the "listing" phase (finding IDs) from the "fetching" phase (getting details).
+*   **Storage**: Uses `aiosqlite` to persist state.
+    *   `messages` table: Stores message IDs, sizes, headers, and fetch status.
+    *   `state` table: Tracks pagination tokens (e.g., `nextPageToken`) to resume listings.
+*   **Analyzer**: Loads completed records from the DB into `pandas` for grouping and aggregation.
 
 ## Setup
 
@@ -39,11 +48,11 @@ uv run main.py [options]
 
 ### Options
 
-*   `-q, --query`: Gmail search query (e.g., `'larger:5M'`, `'category:promotions'`).
-*   `-l, --limit`: Limit the number of messages to scan.
-*   `--by-sender`: Show usage grouped by sender.
-*   `--by-month`: Show usage grouped by month.
-*   `--reset`: Clear the local database and cache before starting.
+*   `-q, --query`: Gmail search query (e.g., `'larger:5M'`, `'category:promotions'`, `'older_than:1y'`).
+*   `-l, --limit`: Limit the total number of messages to scan (default: **Unlimited**).
+*   `--by-sender`: Show storage usage grouped by sender.
+*   `--by-month`: Show storage usage grouped by month.
+*   `--reset`: Clear the local database (`gmail_du.db`) and cache before starting a fresh scan.
 
 ### Examples
 
@@ -54,10 +63,13 @@ uv run main.py -l 1000
 
 **Resume a previous scan:**
 Just run the command again. It will automatically pick up where it left off.
-
-**Analyze usage by sender:**
 ```bash
-uv run main.py --by-sender
+uv run main.py
+```
+
+**Analyze usage by sender for huge emails:**
+```bash
+uv run main.py -q "larger:10M" --by-sender
 ```
 
 **Force a fresh start:**
