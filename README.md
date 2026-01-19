@@ -4,13 +4,18 @@ A Python CLI tool to visualize Gmail storage usage, grouped by various factors l
 
 ## Setup
 
-1.  **Install Dependencies**:
+1.  **Install uv**:
     ```bash
-    pip install -r requirements.txt --break-system-packages
+    pip install uv
     ```
-    *(Note: The `--break-system-packages` flag might be required in some managed environments where virtual environments are not easily created without root access. Ideally, use a virtual environment if possible.)*
 
-2.  **Get Credentials**:
+2.  **Install Dependencies**:
+    Sync the project environment:
+    ```bash
+    uv sync
+    ```
+
+3.  **Get Credentials**:
     *   Go to the [Google Cloud Console](https://console.cloud.google.com/).
     *   Create a new project.
     *   Enable the **Gmail API**.
@@ -20,10 +25,10 @@ A Python CLI tool to visualize Gmail storage usage, grouped by various factors l
 
 ## Usage
 
-Run the tool using Python:
+Run the tool using `uv run`:
 
 ```bash
-python3 main.py [options]
+uv run main.py [options]
 ```
 
 ### Options
@@ -37,15 +42,15 @@ python3 main.py [options]
 
 **Scan top 100 messages:**
 ```bash
-python3 main.py
+uv run main.py
 ```
 
 **Scan messages larger than 1MB and group by sender:**
 ```bash
-python3 main.py -q "larger:1M" -l 500 --by-sender
+uv run main.py -q "larger:1M" -l 500 --by-sender
 ```
 
 **Analyze usage over time:**
 ```bash
-python3 main.py -l 1000 --by-month
+uv run main.py -l 1000 --by-month
 ```
