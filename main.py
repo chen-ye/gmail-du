@@ -1,7 +1,9 @@
 import argparse
 import asyncio
+import logging
 
 from rich.console import Console
+from rich.logging import RichHandler
 from rich.table import Table
 
 from analyzer import GmailAnalyzer
@@ -10,6 +12,14 @@ from scanner import AsyncGmailScanner
 from storage import Storage
 
 console = Console()
+
+logging.basicConfig(
+    level="INFO",
+    format="%(message)s",
+    datefmt="[%X]",
+    handlers=[RichHandler(console=console)],
+)
+log = logging.getLogger("gmail-du")
 
 
 def print_summary(count, total_size):
@@ -71,60 +81,64 @@ async def async_main():
 
     await storage.init_db()
 
-    # 2. Auth
     try:
-        creds = authenticate()
-    except Exception as e:
-        console.print(f"[bold red]Authentication failed:[/bold red] {e}")
-        return
+        # 2. Auth
+        try:
+            creds = authenticate()
+        except Exception as e:
+            console.print(f"[bold red]Authentication failed:[/bold red] {e}")
+            return
 
-    # TUI Mode
-    if args.tui:
-        from tui import GmailDUApp
+        # TUI Mode
+        if args.tui:
+            from tui import GmailDUApp
 
-        app = GmailDUApp(storage, creds)
-        await app.run_async()
-        return
+            app = GmailDUApp(storage, creds)
+            await app.run_async()
+            return
 
-    # CLI Mode
-    console.print("[bold blue]Gmail DU[/bold blue] (CLI Mode)")
+        # CLI Mode
+        console.print("[bold blue]Gmail DU[/bold blue] (CLI Mode)")
 
-    scanner = AsyncGmailScanner(creds, storage)
+        scanner = AsyncGmailScanner(creds, storage)
 
-    try:
-        total, completed = await storage.get_total_counts()
-        console.print(
-            f"Database status: {total} messages found, {completed} details fetched."
-        )
+        try:
+            total, completed = await storage.get_total_counts()
+            log.info(
+                f"Database status: {total} messages found, {completed} details fetched."
+            )
 
-        if args.limit and total >= args.limit:
-            console.print("Limit reached in DB. Skipping list fetch.")
-        else:
-            await scanner.fetch_list(query=args.query, limit=args.limit)
+            if args.limit and total >= args.limit:
+                log.info("Limit reached in DB. Skipping list fetch.")
+            else:
+                await scanner.fetch_list(query=args.query, limit=args.limit)
 
-        while True:
-            processed = await scanner.fetch_details()
-            if processed == 0:
-                break
-            console.print(f"Processed batch of {processed}. Checking for more...")
+            while True:
+                processed = await scanner.fetch_details()
+                if processed == 0:
+                    break
+                log.info(f"Processed batch of {processed}. Checking for more...")
+
+        finally:
+            await scanner.close()
+
+        log.info("Loading data for analysis...")
+        rows = await storage.get_all_completed_messages()
+        analyzer = GmailAnalyzer(rows)
+
+        count, total_size = analyzer.summary()
+        print_summary(count, total_size)
+
+        if args.by_sender:
+            sender_data = analyzer.group_by_sender()
+            print_grouped_data("Top Senders by Size", sender_data)
+
+        if args.by_month:
+            month_data = analyzer.group_by_month()
+            print_grouped_data("Usage by Month", month_data)
 
     finally:
-        await scanner.close()
-
-    console.print("Loading data for analysis...")
-    rows = await storage.get_all_completed_messages()
-    analyzer = GmailAnalyzer(rows)
-
-    count, total_size = analyzer.summary()
-    print_summary(count, total_size)
-
-    if args.by_sender:
-        sender_data = analyzer.group_by_sender()
-        print_grouped_data("Top Senders by Size", sender_data)
-
-    if args.by_month:
-        month_data = analyzer.group_by_month()
-        print_grouped_data("Usage by Month", month_data)
+        await storage.close()
 
 
 def main():

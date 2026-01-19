@@ -1,7 +1,5 @@
 import os.path
 
-from typing import Optional
-
 from google.auth.transport.requests import Request
 from google.oauth2.credentials import Credentials
 from google_auth_oauthlib.flow import InstalledAppFlow
@@ -14,7 +12,7 @@ SCOPES = [
 
 
 def authenticate() -> Credentials:
-    creds: Optional[Credentials] = None
+    creds: Credentials | None = None
     # The file token.json stores the user's access and refresh tokens, and is
     # created automatically when the authorization flow completes for the first
     # time.
@@ -37,4 +35,3 @@ def authenticate() -> Credentials:
             token.write(creds.to_json())
 
     return creds
-

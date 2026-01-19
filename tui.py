@@ -1,12 +1,10 @@
 import asyncio
-from typing import Any, List, Optional, Tuple
 
 import pandas as pd
 from google.oauth2.credentials import Credentials
 from textual.app import App, ComposeResult
 from textual.binding import Binding
 from textual.containers import Container, Horizontal
-from textual.worker import Worker
 from textual.widgets import (
     Button,
     DataTable,
@@ -18,6 +16,7 @@ from textual.widgets import (
     Select,
     Static,
 )
+from textual.worker import Worker
 
 from analyzer import GmailAnalyzer
 from scanner import AsyncGmailScanner
@@ -84,10 +83,10 @@ class GmailDUApp(App):
         super().__init__()
         self.storage = storage
         self.creds = creds
-        self.scanner: Optional[AsyncGmailScanner] = None
-        self.worker: Optional[Worker] = None
+        self.scanner: AsyncGmailScanner | None = None
+        self.worker: Worker | None = None
         self.current_view: str = "Top Senders"
-        self.drill_filter: Optional[Tuple[str, str]] = None
+        self.drill_filter: tuple[str, str] | None = None
         # Cache current dataframe for lookups
         self.current_df = pd.DataFrame()
 
@@ -201,7 +200,7 @@ class GmailDUApp(App):
             self.notify("No row selected.", severity="warning")
             return
 
-        ids_to_mark: List[str] = []
+        ids_to_mark: list[str] = []
         label_desc = ""
 
         # Determine what to mark based on view
@@ -263,7 +262,7 @@ class GmailDUApp(App):
         # Run in worker
         self.run_worker(self.mark_task(ids_to_mark), exclusive=False, thread=False)
 
-    async def mark_task(self, ids: List[str]) -> None:
+    async def mark_task(self, ids: list[str]) -> None:
         scanner = AsyncGmailScanner(self.creds, self.storage)
         try:
             count = await scanner.add_labels(ids)
@@ -311,7 +310,7 @@ class GmailDUApp(App):
                 display_df = df[df["year_month"] == fval]
                 title = f"Messages in {fval}"
             else:
-                 title = "Messages"
+                title = "Messages"
 
             self.query_one("#stats_display", Static).update(
                 f"{title} ({len(display_df)} msgs)"
