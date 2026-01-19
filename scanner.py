@@ -1,5 +1,6 @@
 import asyncio
-from typing import Any, Dict, List, Optional
+import logging
+from typing import Any
 
 import aiohttp
 from google.auth.transport.requests import Request
@@ -11,13 +12,15 @@ from storage import Storage
 # Limit concurrency to avoid hitting rate limits too hard
 MAX_CONCURRENT_REQUESTS = 30
 
+log = logging.getLogger(__name__)
+
 
 class AsyncGmailScanner:
     def __init__(self, credentials: Credentials, storage: Storage) -> None:
         self.creds = credentials
         self.storage = storage
         self.base_url = "https://gmail.googleapis.com/gmail/v1/users/me"
-        self.session: Optional[aiohttp.ClientSession] = None
+        self.session: aiohttp.ClientSession | None = None
 
     async def _get_session(self) -> aiohttp.ClientSession:
         if self.session is None or self.session.closed:
@@ -41,7 +44,7 @@ class AsyncGmailScanner:
         if self.session:
             await self.session.close()
 
-    async def fetch_list(self, query: str = "", limit: Optional[int] = None) -> None:
+    async def fetch_list(self, query: str = "", limit: int | None = None) -> None:
         """
         Fetch message list pages and save IDs to DB.
         """
@@ -52,7 +55,7 @@ class AsyncGmailScanner:
 
         total_fetched = 0
 
-        print("Scanning message list...")
+        log.info("Scanning message list...")
         while True:
             if next_page_token:
                 params["pageToken"] = next_page_token
@@ -60,7 +63,7 @@ class AsyncGmailScanner:
             async with session.get(f"{self.base_url}/messages", params=params) as resp:
                 if resp.status != 200:
                     text = await resp.text()
-                    print(f"Error listing messages: {resp.status} - {text}")
+                    log.error(f"Error listing messages: {resp.status} - {text}")
                     break
 
                 data = await resp.json()
@@ -69,7 +72,9 @@ class AsyncGmailScanner:
                 if messages:
                     await self.storage.save_messages_batch(messages)
                     total_fetched += len(messages)
-                    print(f"Found {len(messages)} messages (Total: {total_fetched})...")
+                    log.info(
+                        f"Found {len(messages)} messages (Total: {total_fetched})..."
+                    )
 
                 next_page_token = data.get("nextPageToken")
                 await self.storage.save_state(
@@ -93,7 +98,7 @@ class AsyncGmailScanner:
         if not pending_ids:
             return 0
 
-        async def get_msg(mid: str) -> Optional[Dict[str, Any]]:
+        async def get_msg(mid: str) -> dict[str, Any] | None:
             async with semaphore:
                 try:
                     url = f"{self.base_url}/messages/{mid}"
@@ -111,7 +116,7 @@ class AsyncGmailScanner:
                 except Exception:
                     return None
 
-        results: List[Dict[str, Any]] = []
+        results: list[dict[str, Any]] = []
         with Progress(
             TextColumn("[progress.description]{task.description}"),
             BarColumn(),
@@ -180,7 +185,7 @@ class AsyncGmailScanner:
                 raise Exception(f"Failed to create label: {text}")
 
     async def add_labels(
-        self, message_ids: List[str], label_name: str = "gmail-du-marked"
+        self, message_ids: list[str], label_name: str = "gmail-du-marked"
     ) -> int:
         """Apply label to a list of message IDs."""
         if not message_ids:
@@ -203,11 +208,10 @@ class AsyncGmailScanner:
                     if resp.status == 200:
                         total_modified += len(chunk)
                     else:
-                        print(f"Error modifying batch: {await resp.text()}")
+                        log.error(f"Error modifying batch: {await resp.text()}")
 
             return total_modified
 
         except Exception as e:
-            print(f"Error adding labels: {e}")
+            log.error(f"Error adding labels: {e}")
             raise
-

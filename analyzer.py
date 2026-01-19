@@ -1,14 +1,14 @@
 import datetime
-from typing import Any, List, Tuple
+from typing import Any
 
 import pandas as pd
 
 
 class GmailAnalyzer:
-    def __init__(self, db_rows: List[Any]) -> None:
+    def __init__(self, db_rows: list[Any]) -> None:
         self.df = self._prepare_dataframe(db_rows)
 
-    def _prepare_dataframe(self, rows: List[Any]) -> pd.DataFrame:
+    def _prepare_dataframe(self, rows: list[Any]) -> pd.DataFrame:
         """Convert DB rows to DataFrame."""
         if not rows:
             return pd.DataFrame(columns=["id", "size", "sender", "date", "year_month"])
@@ -36,7 +36,7 @@ class GmailAnalyzer:
 
         return pd.DataFrame(data)
 
-    def summary(self) -> Tuple[int, int]:
+    def summary(self) -> tuple[int, int]:
         """Basic summary stats."""
         if self.df.empty:
             return 0, 0
@@ -62,4 +62,3 @@ class GmailAnalyzer:
             return pd.Series()
         grouped = self.df.groupby("year_month")["size"].sum().sort_index()
         return grouped
-
