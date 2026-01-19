@@ -93,7 +93,9 @@ class Storage:
             async with db.execute(
                 "SELECT * FROM messages WHERE status = 'complete'"
             ) as cursor:
-                return await cursor.fetchall()
+                rows = await cursor.fetchall()
+                return list(rows)
+
 
 
     async def get_total_counts(self) -> Tuple[int, int]:
